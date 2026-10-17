@@ -24,7 +24,7 @@ printf 'manual\n' > "$home/config/backlog-backend"
 fm_test_tasks_toml "$home/.tasks.toml"
 export TEST_HOUSE_HOME="$home" TEST_HOUSE_PROJECT="$project" TEST_HOUSE_ROOT="$ROOT"
 python3 - <<'PY'
-import hashlib, hmac, json, os, pathlib, subprocess
+import hashlib, hmac, json, os, pathlib, subprocess, uuid
 home = pathlib.Path(os.environ['TEST_HOUSE_HOME'])
 project = os.environ['TEST_HOUSE_PROJECT']
 root = pathlib.Path(os.environ['TEST_HOUSE_ROOT'])
@@ -35,7 +35,7 @@ key = b'test-key-not-a-customer-secret-1234567890'
 env = dict(os.environ, FM_HOME=str(home))
 for name in ('FM_TASK_INBOX', 'FM_SUPERVISION_ACTOR', 'FM_STATE_OVERRIDE', 'FM_DATA_OVERRIDE', 'FM_CONFIG_OVERRIDE'):
     env.pop(name, None)
-request = '11111111-1111-4111-8111-111111111111'
+request = str(uuid.uuid4())
 p = dict(version=1, producer='fixture', origin='fixture', action='implement', request_id=request, body='Change synthetic label', reply_to=None, child=None)
 envelope = dict(payload=p, signature=hmac.new(key, json.dumps(p, sort_keys=True, separators=(',', ':')).encode(), hashlib.sha256).hexdigest())
 def call(*args, body=None):
