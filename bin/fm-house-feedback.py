@@ -50,8 +50,12 @@ children, updates, fully_installed). Children expose the stable task, scope,
 dependencies, applied/desired revisions, pending reply UUIDs, follow-up bindings,
 attempt timestamps and observed start incarnations. Missing children means
 unclassified, never complete. Historical updates retain exact manifests and
-ordered stage/proof events independently of current activity. fully_installed
-requires every child and desired follow-up; no partial parent completion.
+ordered stage/proof events independently of current activity. Installed evidence
+for a child's applied revision takes precedence over later Checking in another
+update; that later update retains its own Checking stage. Dependencies accept
+Ready or Installed only when desired replies/follow-ups are also settled.
+fully_installed requires every child and desired follow-up; no partial parent
+completion.
 refresh reuses current-state reconciliation on existing supervision events;
 missing/unknown endpoints are reconciliation-needed, never permanently Working.
 No new monitor is started. started records observation time, not an inferred
