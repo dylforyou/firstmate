@@ -664,7 +664,11 @@ export function branchOfferForWake(state: string, message: string, afk: boolean,
   const needsDecisionTasks = new Set(scope.needsDecisionKeys.map(taskIdentity));
   const isNeedsDecisionTrigger = triggerKeys.some((key) => needsDecisionTasks.has(taskIdentity(key)));
   const houseTrigger = /^check: captain inbox note ([A-Za-z0-9._-]+) -/.exec(message);
-  const eligibleHouseTrigger = Boolean(houseTrigger && houseFeedbackCheck(state, `inbox:${houseTrigger[1]}`, attendedHost));
+  // Rearming republishes the queue rather than the original inbox reason.
+  // In attended Pi scope, checkSeqs contains only authenticated House rows;
+  // do not let the generic resurfacing reason strand those behind busy MAIN.
+  const eligibleHouseTrigger = Boolean(houseTrigger && houseFeedbackCheck(state, `inbox:${houseTrigger[1]}`, attendedHost)) ||
+    (message === "check: rearm-resurface" && !afk && !attendedHost && scope.checkSeqs.length > 0);
   const attendedEligible = (!isCheckTrigger || eligibleHouseTrigger) && !isNeedsDecisionTrigger && (
     afk ? scopeForUnreadWake(state, heartbeat, false).eligible : scope.eligible
   );

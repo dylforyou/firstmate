@@ -221,11 +221,15 @@ writeFileSync(`${state}/.wake-queue`, `1\t1\tcheck\tinbox:${receipt}\tcheck: cap
 const message = `check: captain inbox note ${receipt} - idea`;
 assert.equal(branchOfferForWake(state, message, false).eligible, true);
 assert.deepEqual(branchOfferForWake(state, message, false).scope.eligibleSeqs, ['1']);
+assert.equal(branchOfferForWake(state, 'check: rearm-resurface', false).eligible, true);
+assert.deepEqual(branchOfferForWake(state, 'check: rearm-resurface', false).scope.eligibleSeqs, ['1']);
+assert.equal(branchOfferForWake(state, 'check: rearm-resurface', false, true).eligible, false);
 const recordPath = `${state}/house-feedback/${request}.json`;
 const original = readFileSync(recordPath, 'utf8');
 const tampered = JSON.parse(original);
 tampered.envelope.signature += 'zz';
 writeFileSync(recordPath, JSON.stringify(tampered));
+assert.equal(branchOfferForWake(state, 'check: rearm-resurface', false).eligible, false);
 assert.equal(branchOfferForWake(state, message, false).eligible, false);
 writeFileSync(recordPath, original);
 assert.equal(branchOfferForWake(state, message, false, true).eligible, false);
@@ -236,6 +240,7 @@ const cfg = JSON.parse(readFileSync(configPath, 'utf8'));
 writeFileSync(configPath, JSON.stringify({ ...cfg, project: '/wrong-project' }));
 assert.equal(branchOfferForWake(state, message, false).eligible, false);
 writeFileSync(configPath, JSON.stringify({ ...cfg, enabled: false }));
+assert.equal(branchOfferForWake(state, 'check: rearm-resurface', false).eligible, false);
 assert.equal(branchOfferForWake(state, message, false).eligible, false);
 console.log('PASS: actual branch routing interface narrows authenticated checks; generic, legacy, unsupported host and feature-off remain MAIN-owned');
 JS
