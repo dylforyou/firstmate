@@ -3,7 +3,7 @@
 
 Run FM_HOUSE_FEEDBACK_NATIVE=1 python3 tests/fm-house-feedback-native.test.py.
 Temporary homes and real treehouse allocations stay inside this checkout.
-Transcripts survive under data/house-feedback-auto-dispatch/native-evidence.
+Set FM_HOUSE_FEEDBACK_EVIDENCE to the approved evidence directory for transcripts.
 No default session, installed home, device, or pipeline is operated on.
 """
 import hashlib
@@ -32,12 +32,12 @@ def main():
 
     signal.signal(signal.SIGTERM, interrupted)
     lab = Path(tempfile.mkdtemp(prefix=".house-native-", dir=ROOT))
-    evidence = ROOT / "data/house-feedback-auto-dispatch/native-evidence" / lab.name
+    evidence = Path(os.environ["FM_HOUSE_FEEDBACK_EVIDENCE"]) / lab.name
     evidence.mkdir(parents=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith(("FM_", "HERDR_", "PI_")) and k not in ("TMUX", "BASH_ENV", "ENV")}
     env["PATH"] = "/Users/dylan/.nvm/versions/node/v24.16.0/bin:" + env["PATH"]
     original_path = env["PATH"]
-    for directory in ("tmp", "bookkeeping", "tools", "home/config", "home/data", "home/state", "home/projects/toy", "sessions"):
+    for directory in ("tmp", "bookkeeping", "tools", "sessions"):
         (lab / directory).mkdir(parents=True)
     env.update(TMPDIR=str(lab / "tmp"), FM_HERDR_LAB_STATE_DIR=str(lab / "bookkeeping"))
     helper = ROOT / "bin/fm-herdr-lab.sh"
@@ -62,6 +62,8 @@ def main():
     project = home / "projects/toy"
     provisioned = False
     try:
+        run([ROOT / "bin/fm-lab-home.sh", "create", home])
+        project.mkdir(parents=True)
         run(["git", "init", "-q", project])
         # init resolves the repository root: create the disposable repo first.
         run(["treehouse", "init"], cwd=project)
@@ -75,8 +77,10 @@ def main():
         run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Fixture"], cwd=project)
         run(["treehouse", "status"], cwd=project)
         # Source links retain current-source extensions and production owners.
-        for name in ("bin", ".pi", ".agents", "docs", "AGENTS.md", ".tasks.toml"):
+        for name in ("bin", ".pi", ".agents", "docs", "AGENTS.md"):
             (home / name).symlink_to(ROOT / name, target_is_directory=(ROOT / name).is_dir())
+        # Admission requires configuration owned by this home, not a code-root link.
+        shutil.copyfile(ROOT / ".tasks.toml", home / ".tasks.toml")
         (home / "config/backend").write_text("herdr\n")
         (home / "config/crew-harness").write_text("pi\n")
         (home / "config/backlog-backend").write_text("manual\n")
@@ -119,24 +123,51 @@ def main():
         run(["python3", ROOT / "bin/fm-house-feedback.py", "accept"], input=json.dumps(envelope))
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
+            herdr("pane", "read", pane, "--format", "text")
             projection = json.loads(run(["python3", ROOT / "bin/fm-house-feedback.py", "show", request]))
             (evidence / "projection.json").write_text(json.dumps(projection, indent=2))
             if any(c.get("started_at") for c in projection["children"].values()):
                 herdr("agent", "get", pane)
                 allocations = list((lab / ".treehouse").rglob("label.txt"))
                 assert allocations, "no supported worktree-local allocation"
-                assert any(p.read_text().strip() == "After" for p in allocations), "worker did not execute the edit"
+                if not any(p.read_text().strip() == "After" for p in allocations):
+                    time.sleep(5)
+                    continue
                 print("PASS: native independent worker executed after authenticated intake")
-                raise RuntimeError("first milestone only: four remaining acceptance cases not yet implemented")
+                # Signed synthetic manifests exercise the production projection owner;
+                # they are not claims about physical installation on a phone.
+                child_key, child = next((k, c) for k, c in projection["children"].items() if c.get("started_at"))
+                commit = run(["git", "rev-parse", "HEAD"], cwd=project).strip()
+                for update_id, stages in (("installed-history", ("checking", "ready", "installed")), ("later-combined", ("checking",))):
+                    for stage in stages:
+                        update = dict(version=1, producer="fixture", origin="fixture", action=stage,
+                                      update_id=update_id, source_commit=commit,
+                                      artifact_sha256=hashlib.sha256(update_id.encode()).hexdigest(),
+                                      proof_sha256=hashlib.sha256((update_id + stage).encode()).hexdigest(),
+                                      includes=[dict(request_id=request, child=child_key, revision=child["revision"])])
+                        signed = dict(payload=update, signature=hmac.new(key, json.dumps(update, sort_keys=True, separators=(",", ":")).encode(), hashlib.sha256).hexdigest())
+                        run(["python3", ROOT / "bin/fm-house-feedback.py", "update"], input=json.dumps(signed))
+                history = json.loads(run(["python3", ROOT / "bin/fm-house-feedback.py", "show", request]))
+                assert history["children"][child_key]["stage"] == "installed"
+                assert history["fully_installed"]
+                assert {u["update_id"]: u["stage"] for u in history["updates"]} == {"installed-history": "installed", "later-combined": "checking"}
+                (evidence / "installed-history.json").write_text(json.dumps(history, indent=2))
+                print("PASS: historical Installed survives later Checking")
+                raise RuntimeError("acceptance incomplete: dependent reservation and both staged revocation cases remain unproven")
             time.sleep(5)
         raise RuntimeError("no observed native worker start during the busy-primary window")
     finally:
         # Preserve owned runtime evidence before guarded teardown; never repeat old cleanup.
         if (home / "state").exists():
             shutil.copytree(home / "state", evidence / "state", dirs_exist_ok=True)
+        if (home / "data").exists():
+            shutil.copytree(home / "data", evidence / "data", dirs_exist_ok=True)
         shutil.copytree(lab / "sessions", evidence / "sessions", dirs_exist_ok=True)
         if provisioned:
             run([helper, "teardown", session])
+        # Spawn deliberately seals hook directories; unseal only this owned lab.
+        for directory, _, _ in os.walk(lab):
+            os.chmod(directory, 0o700)
         shutil.rmtree(lab)
         log.close()
 
