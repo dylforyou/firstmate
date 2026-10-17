@@ -2670,3 +2670,22 @@ Without Firstmate's hooks, Herdr reported the question panel as `blocked`, which
 This live proof covers the watcher and queue boundary; it does not establish live daemon-consumer delivery.
 `bin/fm-test-run.sh tests/fm-daemon.test.sh` exercises that consumer routing separately with portable regressions for busy escalation and busy-bookkeeping failures in away and quiet mode.
 Repeat the hooked-worker check above before publication if watcher or task-inbox busy code changes; `bin/fm-test-run.sh tests/fm-task-inbox.test.sh` refreshes the portable ladder regressions.
+
+## Authenticated House feedback worker-start evidence
+
+Verified on 2026-10-17 with Pi `1.0.0`, tmux `3.7c`, and the configured `openai-codex/gpt-6-astra` model at medium effort.
+`FM_HOUSE_FEEDBACK_LIVE_E2E=1 nice -n 10 bash bin/fm-test-run.sh tests/fm-house-feedback-live-e2e.test.sh --jobs 1` returned:
+
+```text
+PASS: real Pi worker-start evidence from the guarded attended branch spawn
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=8063
+```
+
+The guard uses a private tmux socket, disposable producer key and toy isolated project, runs the actual attended branch actor through `fm-spawn.sh`, and requires the real worker to execute its synthetic instruction before observing it through the unchanged crew-state pane classifier and recording Working.
+Treehouse allocation and unrelated validation-run lookup are fixture-only; the model process and pane signals are not stubbed.
+The regression's structured timing output separates local synthetic capture, durable receipt, reservation, consumed launch attempt and observed worker start; it is not a mobile latency or installation guarantee.
+`tests/fm-house-feedback.test.sh` covers producer verification, immutable IDs, duplicate receipts, ordered replies, failure/closure projection, follow-up completion and exact update inclusion with synthetic policy observations.
+`tests/fm-house-feedback-spawn.test.sh` exercises the ordinary spawn entrypoint and repeated-attempt refusal without spending model tokens.
+The exception supports only Pi workers on tmux or Herdr; the new admission path has live Pi/tmux evidence here, not live House/Herdr end-to-end or physical-install evidence.
+The existing Herdr lifecycle classifiers are unchanged, while zellij, cmux, Orca, non-Pi workers and the non-Pi supervision host do not receive this new launch authority.
+No installed application, operational home configuration, existing bearer, service or real signing key is exercised by these guards.

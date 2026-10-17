@@ -1679,6 +1679,10 @@ spawn_abort_cleanup() {
     fi
     fm_lock_release "$SPAWN_TASK_LOCK" || true
   fi
+  if [ "${HOUSE_FEEDBACK_LEASE_HELD:-0}" -eq 1 ]; then
+    fm_lease_guard_release
+    HOUSE_FEEDBACK_LEASE_HELD=0
+  fi
   return "$status"
 }
 trap spawn_abort_cleanup EXIT
@@ -1855,8 +1859,29 @@ fi
 # the words); filing the item the captain asked for is not inventing work.
 # shellcheck source=bin/fm-lease-lib.sh
 . "$SCRIPT_DIR/fm-lease-lib.sh"
+HOUSE_FEEDBACK_SPAWN=0
+HOUSE_FEEDBACK_TASK=0
+case "$ID" in
+  hf-*)
+    if grep -qx 'house_feedback=1' "$STATE/$ID.meta" 2>/dev/null ||
+      python3 "$SCRIPT_DIR/fm-house-feedback.py" bound "$ID" >/dev/null 2>&1; then
+      HOUSE_FEEDBACK_TASK=1
+    fi
+    ;;
+esac
+if [ "$RELAUNCH" -eq 1 ] && [ "$HOUSE_FEEDBACK_TASK" -eq 1 ]; then
+  python3 "$SCRIPT_DIR/fm-house-feedback.py" recovery-check "$ID" >/dev/null || exit "$FM_LEASE_REFUSE_EXIT"
+fi
 if [ "$RELAUNCH" -ne 1 ]; then
-  fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
+  if [ "$HOUSE_FEEDBACK_TASK" -eq 1 ]; then
+    [ "$KIND" = ship ] && [ "${#POS[@]}" -eq 2 ] || exit "$FM_LEASE_REFUSE_EXIT"
+    fm_lease_guard "$ID" "House feedback spawn"
+    HOUSE_FEEDBACK_LEASE_HELD=1
+    python3 "$SCRIPT_DIR/fm-house-feedback.py" check "$ID" "${POS[1]}" "$MODE" "$YOLO" >/dev/null || exit "$FM_LEASE_REFUSE_EXIT"
+    HOUSE_FEEDBACK_SPAWN=1
+  else
+    fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
+  fi
 fi
 spawn_refuse_if_away_spend_cap() {
   local cap live
@@ -1900,7 +1925,11 @@ spawn_require_relocated_queued_work() {
   if [ "$KIND" = secondmate ]; then
     fm_lease_forbid_branch "new-task spawn (fm-spawn)"
   fi
-  fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
+  if [ "$HOUSE_FEEDBACK_SPAWN" -eq 1 ]; then
+    python3 "$SCRIPT_DIR/fm-house-feedback.py" check "$ID" "${POS[1]}" "$MODE" "$YOLO" >/dev/null || exit "$FM_LEASE_REFUSE_EXIT"
+  else
+    fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
+  fi
   if ! fm_backlog_row_probe "$DATA" "$ID" || [ "$FM_BACKLOG_ROW_STATE" != "queued no no" ]; then
     echo "error: spawn refused - the supervision branch under the away-posture record may dispatch only queued unblocked work (already queued, or filed by the branch from the captain's away words); task $ID has no dispatchable backlog item in this home" >&2
     exit 1
@@ -3769,6 +3798,19 @@ BRIEF_REAL="$BRIEF_DIR_REAL/$(basename "$BRIEF")"
 # isolation guard refuses a spawn that never actually tangled). Canonicalize
 # once here so every downstream comparison uses the same physical form
 # (docs/herdr-backend.md "Known gaps").
+if [ "$HOUSE_FEEDBACK_SPAWN" -eq 1 ]; then
+  # Consume once under the existing task-set/task locks, before provisioning.
+  # A failure after this point is unknown, not permission to launch again.
+  [ "$RAW_LAUNCH" -eq 0 ] && [ "$HARNESS" = pi ] || {
+    echo 'error: House feedback supports only configured Pi workers' >&2
+    exit "$FM_LEASE_REFUSE_EXIT"
+  }
+  case "$BACKEND" in tmux|herdr) ;; *)
+    echo 'error: House feedback requires a recovery-grade tmux or Herdr backend' >&2
+    exit "$FM_LEASE_REFUSE_EXIT" ;;
+  esac
+  python3 "$SCRIPT_DIR/fm-house-feedback.py" authorize "$ID" "$PROJ_ABS" "$MODE" "$YOLO" >/dev/null || exit "$FM_LEASE_REFUSE_EXIT"
+fi
 PROJ_ABS_REAL=$(cd "$PROJ_ABS" 2>/dev/null && pwd -P) || PROJ_ABS_REAL="$PROJ_ABS"
 
 real_path_or_raw() { # <path>
@@ -5808,6 +5850,7 @@ preserve_relaunch_meta() {
   [ -z "$WORKER_ACCOUNT_PROVIDER" ] || echo "account_provider=$WORKER_ACCOUNT_PROVIDER"
   [ -z "${BUSY_GEN:-}" ] || echo "busy_gen=$BUSY_GEN"
   echo "spawn_gen=$SPAWN_GEN"
+  [ "$HOUSE_FEEDBACK_TASK" -ne 1 ] || echo 'house_feedback=1'
   # Default-off writes no traceparent= line.
   # backend= is written only for a non-default (non-tmux) backend, so the
   # default path's meta stays byte-identical (absent backend= means tmux;
@@ -6300,6 +6343,11 @@ if [ -e "$LAUNCH_FILE" ] || [ -L "$LAUNCH_FILE" ]; then
   echo "error: task launch file $LAUNCH_FILE already exists; refusing to replace it" >&2
   exit 1
 fi
+if [ "$HOUSE_FEEDBACK_TASK" -eq 1 ]; then
+  # A pane may execute delivered text later; check again immediately before
+  # exec as well as at delivery, never treating queued text as authority.
+  LAUNCH="FM_HOME=$(shell_quote "$FM_HOME") python3 $(shell_quote "$SCRIPT_DIR/fm-house-feedback.py") verify-launch $(shell_quote "$ID") $(shell_quote "$PROJ_ABS") $(shell_quote "$SPAWN_GEN") >/dev/null && $LAUNCH"
+fi
 if ! (umask 077 && printf '%s\n' "$LAUNCH" >"$LAUNCH_STAGE" &&
   chmod 0600 "$LAUNCH_STAGE" && mv -f "$LAUNCH_STAGE" "$LAUNCH_FILE"); then
   rm -f "$LAUNCH_STAGE"
@@ -6340,6 +6388,11 @@ spawn_orca_wait_launch_consumed() {
     sleep 0.2
   done
 }
+if [ "$HOUSE_FEEDBACK_TASK" -eq 1 ]; then
+  # Configuration/provenance can change while an isolated copy is prepared.
+  # Recheck at actual launch delivery, against the published incarnation.
+  python3 "$SCRIPT_DIR/fm-house-feedback.py" verify-launch "$ID" "$PROJ_ABS" "$SPAWN_GEN" >/dev/null || exit "$FM_LEASE_REFUSE_EXIT"
+fi
 SPAWN_LAUNCH_SENT=1
 # errexit is on here: a failed send still exits, and Orca source mode first
 # removes the credential-bearing file the pane never received.

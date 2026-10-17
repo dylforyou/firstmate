@@ -32,6 +32,11 @@
 #   fm-inbox.sh list
 #   fm-inbox.sh drain [--ack <id>...]
 #
+# list/drain add a reconciliation hint only for pre-existing typed House
+# bindings (bin/fm-house-feedback.py notice); the hint grants no authority and
+# survives opt-out so MAIN cannot accidentally recreate an already-bound task.
+# Generic inbox notes retain their existing output and handling.
+#
 # `note --request-id` is the idempotent capture path: a repeat of the same
 # request id returns the original note instead of creating a second one, and
 # prints `replay` (or JSON `"outcome":"replay"`) so a first submission and a
@@ -1103,11 +1108,17 @@ PY
 
 cmd_list() {
   [ -d "$INBOX" ] || { printf '(inbox empty)\n'; return 0; }
-  local any=0
+  local any=0 binding_notice
   for f in "$INBOX"/*.note; do
     [ -e "$f" ] || break
     any=1
     printf '%s\n' "$(basename "$f" .note)"
+    # A pre-existing typed binding remains a no-duplicate reconciliation hint
+    # even after opt-out; this is not authority inferred from the note body.
+    if [ -d "$STATE/house-feedback" ] && [ -f "$SELF_DIR/fm-house-feedback.py" ]; then
+      binding_notice=$(FM_HOME="$FM_HOME" python3 "$SELF_DIR/fm-house-feedback.py" notice "$(basename "$f" .note)" 2>/dev/null) || binding_notice=
+      [ -z "$binding_notice" ] || printf '    [Firstmate binding] %s\n' "$binding_notice"
+    fi
     sed -n '/^--$/,$p' "$f" | tail -n +2 | sed 's/^/    /'
   done
   [ "$any" -eq 1 ] || printf '(inbox empty)\n'

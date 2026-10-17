@@ -30,11 +30,12 @@ Fleet supervision on the Pi primary harness runs on a second conversation - the 
 ### What the branch handles while attended
 
 Supervision is default-on.
-Once a Pi primary session owns this home's fleet lock, the branch handles two kinds of work:
+Once a Pi primary session owns this home's fleet lock, the branch handles these kinds of work:
 
 - Eligible task-local rows from ordinary actionable wakes.
   A row is one queued wake entry.
 - Heartbeat scans that the cheap bash-level scan flags as possibly captain-relevant.
+- Explicitly enabled authenticated House feedback receipts under the narrow [House feedback exception](#house-feedback-exception).
 
 The branch then merges each outcome back into the captain conversation's transcript.
 
@@ -96,7 +97,7 @@ A successful row grant transfers ownership of exactly the currently branch-eligi
 
 What is never offered, or falls back to main:
 
-- While attended, a check-kind triggering close is never offered, even when other rows are eligible.
+- While attended, a check-kind triggering close is never offered, even when other rows are eligible, except a verified [House feedback receipt](#house-feedback-exception).
   Check-kind closes are merge-confirmation polls, Relay mentions, credential/auth failures, and every other legitimately main-only class.
 - When a triggering close has no acceptor (extension absent, branch broken), it keeps today's wake-to-main path.
 - Watcher-failure alarms always go to main, because only main can repair the watcher cycle.
@@ -254,7 +255,7 @@ The guards are wired into these scripts:
 | Scripts | Guard behavior |
 | --- | --- |
 | `fm-send.sh`, `fm-control.sh`, and `fm-teardown.sh` | Overlap, lease-checked, with claim serialization retained through the mutation. |
-| `fm-pr-merge.sh`, `fm-merge-local.sh`, `fm-spawn.sh`, `fm-send.sh --resolve-key` for a decision key, and `fm-teardown.sh` for a second mate | Main-owned while attended; branch refused. |
+| `fm-pr-merge.sh`, `fm-merge-local.sh`, `fm-spawn.sh`, `fm-send.sh --resolve-key` for a decision key, and `fm-teardown.sh` for a second mate | Main-owned while attended; branch refused except the explicitly bound House fresh-spawn path below. |
 
 A relaunch through `fm-control` stays branch-legal recovery in both postures.
 Under the away-posture record, the PR merge, a fresh spawn, and a decision answer relocate to the branch behind each script's own gate.
@@ -267,6 +268,19 @@ No captain grant file is required.
 
 A fleet-wide heartbeat is separately eligible only when every row other than a check or decision-owned signal/stale row is a heartbeat row or a resolvable task-local row (see "Heartbeat routing" below).
 Every other fleet-wide or unresolvable wake, and every watcher-failure alarm, stays on main.
+
+#### House feedback exception
+
+`bin/fm-house-feedback.py --help` owns the default-off producer envelope, fixed-project configuration, request/child bindings, reply delivery and exact update-evidence interface.
+This is an opt-in to bounded safe implementation, not permission to merge, install, change models, handle credentials or resolve ambiguous or security-sensitive requests autonomously.
+The existing authenticated companion must construct producer proofs after authenticating the owner; inbox text, body hashes and caller-selected request IDs alone are not that proof.
+Its separate signing key and configuration require deliberate operator provisioning; enabling the feature never enrolls a service or replays legacy receipts.
+The Pi branch may classify a verified new request and use the ordinary backlog, brief, dispatch-profile and guarded spawn paths while main is busy.
+The spawn entrypoint rechecks the binding and burns one reservation before provisioning; an unknown launch is reconciled against the existing endpoint, never blindly repeated.
+Only Pi workers on tmux or Herdr are supported by this exception; other primary hosts and backend surfaces retain their existing manual path.
+Existing lifecycle classifiers are reused unchanged, and Working requires observed pane activity tied to the task incarnation, not a receipt or reservation.
+Exact signed integration evidence records Checking, Ready and Installed separately without performing those operations; pending replies never rewrite a checked manifest or make partial parent work Installed.
+The portable policy and guarded-spawn regressions are `tests/fm-house-feedback.test.sh` and `tests/fm-house-feedback-spawn.test.sh`; their synthetic observations are not live lifecycle or physical installation evidence.
 
 #### Pre-drain recheck
 

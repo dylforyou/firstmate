@@ -657,6 +657,66 @@ mod.default(pi);
 JS
 DRIVER_PRELUDE=$(cat "$DRIVER_PRELUDE_FILE")
 
+test_house_receipt_reaches_branch_with_busy_or_idle_main() {
+  local repo home out status
+  repo="$TMP_ROOT/house-dispatch-root"
+  home="$TMP_ROOT/house-dispatch-home"
+  mkdir -p "$home/state" "$home/config"
+  install_pi_branch_extension_fixture "$repo"
+  PLUGIN="$repo/.pi/extensions/fm-branch-supervision.ts" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
+    DRIVER_PRELUDE="$DRIVER_PRELUDE" node --input-type=module > "$TMP_ROOT/house-node-output" 2>&1 <<'EOF'
+await eval(`(async () => { ${process.env.DRIVER_PRELUDE}; globalThis.__house = { fire, makeOffer, bus, settle, mainUserMessages, sentToMain, defaultSessionCtx, home, realRoot, approvedProject }; })()`);
+const { fire, makeOffer, bus, settle, mainUserMessages, sentToMain, defaultSessionCtx, home, realRoot, approvedProject } = globalThis.__house;
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
+const { branchOfferForWake } = await import(`${realRoot}/.pi/extensions/lib/fm-branch-dispatch.ts`);
+writeFileSync(`${home}/state/.lock`, `${process.ppid}\n`);
+await fire('session_start', {}, defaultSessionCtx);
+mkdirSync(`${home}/state/inbox`, { recursive: true });
+mkdirSync(`${home}/state/house-feedback`, { recursive: true });
+const key = Buffer.from('DISPOSABLE-BRANCH-FIXTURE-KEY-1234567890');
+writeFileSync(`${home}/config/key`, key, { mode: 0o600 });
+writeFileSync(`${home}/config/house-feedback.json`, JSON.stringify({ enabled: true, primary: 'pi', producer: 'fixture', origin: 'fixture', project: approvedProject, key_file: `${home}/config/key` }));
+for (const [index, busy] of [false, true].entries()) {
+  if (busy) await fire('agent_start', {});
+  const request = `33333333-3333-4333-8333-33333333333${index}`;
+  const receipt = `fixture-receipt-${index}`;
+  const payload = { version: 1, producer: 'fixture', origin: 'fixture', action: 'implement', request_id: request, body: 'Synthetic bounded request', reply_to: null, child: null };
+  const canonical = JSON.stringify(Object.fromEntries(Object.keys(payload).sort().map((k) => [k, payload[k]])));
+  const envelope = { payload, signature: createHmac('sha256', key).update(canonical).digest('hex') };
+  writeFileSync(`${home}/state/house-feedback/${request}.json`, JSON.stringify({ envelope, project: approvedProject, receipt }));
+  writeFileSync(`${home}/state/inbox/${receipt}.note`, `id=${receipt}\nrequest_id=${request}\n--\n${payload.body}\n`);
+  const message = `check: captain inbox note ${receipt} - synthetic request`;
+  writeFileSync(`${home}/state/.wake-queue`, `1\t${index + 1}\tcheck\tinbox:${receipt}\t${message}\n`);
+  const verdict = branchOfferForWake(`${home}/state`, message, false);
+  if (!verdict.eligible) throw new Error(`House receipt not eligible with busy=${busy}`);
+  let finish;
+  globalThis.__fmOnBranchPrompt = () => new Promise((resolve) => { finish = resolve; });
+  const before = (globalThis.__fmPrompts ?? []).length;
+  const offer = makeOffer(message, [], false, verdict.eligible);
+  bus.emit('fm-branch-supervision:dispatch', offer);
+  if (!offer.accepted) throw new Error(`branch refused House receipt with busy=${busy}`);
+  await settle(() => (globalThis.__fmPrompts ?? []).length > before, 'authenticated House branch prompt');
+  const session = globalThis.__fmSessions.at(-1);
+  const report = session.options.customTools.find((tool) => tool.name === 'fm_branch_report');
+  const result = await report.execute(`house-${index}`, { task: 'fleet', verdict: 'routine', summary: 'Synthetic authenticated request admitted' }, undefined, undefined, {});
+  if (result.isError) throw new Error(JSON.stringify(result));
+  finish();
+  await offer.settlement;
+  if (mainUserMessages.length) throw new Error('House receipt needed primary conversation cooperation');
+  if (sentToMain.at(-1).options.triggerTurn) throw new Error('routine House receipt opened a primary turn');
+  if (busy && sentToMain.at(-1).options.deliverAs !== 'nextTurn') throw new Error('busy primary was interrupted by routine House admission');
+  if (busy) await fire('agent_end', {});
+}
+await fire('session_shutdown', {});
+console.log('House admission is independent of busy/idle main; worker-start proof is the separate live guard.');
+EOF
+  status=$?
+  out=$(cat "$TMP_ROOT/house-node-output")
+  [ "$status" -eq 0 ] || fail "House busy/idle branch admission failed (exit $status): $out"
+  pass "authenticated House receipts reach the actual branch extension with idle or busy main and never require a primary turn"
+}
+
 test_branch_dispatch_two_stage_filter_and_prefix_contract() {
   local repo home out status
   repo="$TMP_ROOT/dispatch-root"
@@ -6190,6 +6250,7 @@ EOF
 test_outcomes_tool_call_headers_follow_the_loaded_pi_version
 test_outcomes_tool_uses_stock_execution_and_export_consumers
 test_real_pi_picker_primitives_stay_bounded_and_searchable
+test_house_receipt_reaches_branch_with_busy_or_idle_main
 test_branch_dispatch_two_stage_filter_and_prefix_contract
 test_requested_healthy_outcome_and_unsolicited_routine_outcome_delivery
 test_captain_outcome_is_exactly_once_across_crash_reload_and_unrelated_response

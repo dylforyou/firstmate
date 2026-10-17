@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { runCommandAsync } from "./fm-async-exec.ts";
 
 // Shared wake-dispatch handshake between the Pi watcher extension (the
@@ -29,6 +30,44 @@ import { runCommandAsync } from "./fm-async-exec.ts";
 // itself; parking main is a cost measure, continuity is the safety property.
 
 export const FM_BRANCH_DISPATCH_EVENT = "fm-branch-supervision:dispatch";
+
+// Routing is only an offer, never spawn authority. fm-house-feedback.py
+// rechecks provenance, opt-in and the task binding at the spawn boundary.
+function houseFeedbackCheck(state: string, key: string, attendedHost: boolean): boolean {
+  if (attendedHost || !/^inbox:[A-Za-z0-9._-]+$/.test(key)) return false;
+  try {
+    const config = JSON.parse(readFileSync(join(dirname(state), "config/house-feedback.json"), "utf8"));
+    if (config.enabled !== true || config.primary !== "pi") return false;
+    if (typeof config.key_file !== "string" || !isAbsolute(config.key_file) || typeof config.project !== "string" || !isAbsolute(config.project)) return false;
+    const info = lstatSync(config.key_file);
+    if (!info.isFile() || info.uid !== process.getuid?.() || (info.mode & 0o777) !== 0o600) return false;
+    const secret = readFileSync(config.key_file);
+    if (secret.length < 32) return false;
+    const noteId = key.slice("inbox:".length);
+    let note: string;
+    try { note = readFileSync(join(state, "inbox", `${noteId}.note`), "utf8"); }
+    catch { note = readFileSync(join(state, "inbox/handled", `${noteId}.note`), "utf8"); }
+    const request = /^request_id=([0-9a-f-]{36})$/m.exec(note.split("\n--\n", 1)[0])?.[1];
+    if (!request) return false;
+    const record = JSON.parse(readFileSync(join(state, "house-feedback", `${request}.json`), "utf8"));
+    const payload = record.envelope.payload;
+    if (payload.request_id !== request) return false;
+    const receipt = record.receipt ?? readFileSync(join(state, "inbox/.requests", request), "utf8").trim();
+    if (`inbox:${receipt}` !== key || record.project !== config.project) return false;
+    if (payload.version !== 1 || payload.action !== "implement" || payload.producer !== config.producer || payload.origin !== config.origin) return false;
+    if (Object.keys(payload).sort().join(",") !== "action,body,child,origin,producer,reply_to,request_id,version") return false;
+    if (typeof record.envelope.signature !== "string" || !/^[0-9a-f]{64}$/.test(record.envelope.signature)) return false;
+    const sorted = Object.fromEntries(Object.keys(payload).sort().map((field) => [field, payload[field]]));
+    const canonical = JSON.stringify(sorted).replace(/[\u0080-\uffff]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+    const proof = Buffer.from(record.envelope.signature, "hex");
+    const expected = createHmac("sha256", secret).update(canonical).digest();
+    const bodyOffset = note.indexOf("\n--\n");
+    return proof.length === expected.length && timingSafeEqual(proof, expected)
+      && bodyOffset >= 0 && typeof payload.body === "string"
+      && note.slice(bodyOffset + 4).replace(/\n+$/, "") === payload.body.replace(/\n+$/, "");
+  } catch { /* Missing, malformed or disabled means the ordinary MAIN path. */ }
+  return false;
+}
 
 // The away-posture record's state-relative filename, exactly as
 // bin/fm-afk-contract.sh writes it. Presence is the only fact read here; the
@@ -131,8 +170,8 @@ export interface UnreadWakeScope {
    */
   needsDecisionKeys: string[];
   /**
-   * The check-kind rows included in eligibleSeqs. Non-empty only in the away
-   * posture, where the branch takes main's rows too; a check row names no
+   * The check-kind rows included in eligibleSeqs: away rows, or explicitly
+   * opted-in verified House receipts while attended. A check row names no
    * task, so a prompt that claims one is not scoped by task.
    */
   checkSeqs: string[];
@@ -180,7 +219,7 @@ const UNSAFE_SCOPE: UnreadWakeScope = {
 // failures, and every other legitimately main-only class - never vetoes a scan
 // in either mode. It is simply excluded from eligibleSeqs and left queued for
 // main, which is woken for it on that check's own watcher cycle
-// (fm-primary-pi-watch.ts forces every check-kind TRIGGER to main), so nothing
+// (except the verified House receipt path in branchOfferForWake), so nothing
 // starves by being left behind.
 //
 // A signal row marked "needs-decision:" by the watcher, a second-mate signal
@@ -442,11 +481,10 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
       continue;
     }
     if (kind === "check") {
-      // Main-owned while attended: excluded from what the branch may claim,
-      // never a reason to reject the rest of the queue and never a reason to
-      // send an otherwise-eligible heartbeat review to main. Away, the branch
-      // is the only actor, so the row is claimed unscoped.
-      if (afk) {
+      // Ordinary checks remain MAIN-owned while attended. Only the narrow
+      // producer-verified House exception can be offered here; spawn still
+      // rechecks its independent action authority. Away takes all checks.
+      if (afk || houseFeedbackCheck(state, key, attendedHost)) {
         eligibleSeqs.push(seq);
         checkSeqs.push(seq);
       }
@@ -625,7 +663,9 @@ export function branchOfferForWake(state: string, message: string, afk: boolean,
     scope.taskByWakeKey[key] ?? scope.taskByWakeKey[key.replace(/^fm-/, "")] ?? key;
   const needsDecisionTasks = new Set(scope.needsDecisionKeys.map(taskIdentity));
   const isNeedsDecisionTrigger = triggerKeys.some((key) => needsDecisionTasks.has(taskIdentity(key)));
-  const attendedEligible = !isCheckTrigger && !isNeedsDecisionTrigger && (
+  const houseTrigger = /^check: captain inbox note ([A-Za-z0-9._-]+) -/.exec(message);
+  const eligibleHouseTrigger = Boolean(houseTrigger && houseFeedbackCheck(state, `inbox:${houseTrigger[1]}`, attendedHost));
+  const attendedEligible = (!isCheckTrigger || eligibleHouseTrigger) && !isNeedsDecisionTrigger && (
     afk ? scopeForUnreadWake(state, heartbeat, false).eligible : scope.eligible
   );
   const eligible = afk ? scope.eligible : attendedEligible;
