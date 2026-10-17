@@ -2427,6 +2427,14 @@ The runner proves exactly one durability boundary: output that reached the runne
 
 `docs/verification/process-event-sources.md` holds the measurements and `.agents/skills/process-event-sources/SKILL.md` owns the handling procedure.
 
+## House feedback (config/house-feedback.json)
+
+House feedback is default-off and separate from ordinary inbox capture.
+An authenticated, explicitly sent request can start bounded implementation through the Pi supervision branch while the primary conversation is busy.
+The [House feedback exception](pi-supervision-branch.md#house-feedback-exception) owns the authority and supported-runtime boundary; `bin/fm-house-feedback.py --help` owns the configuration fields, producer proof, receipt and projection interfaces.
+Provisioning the trusted companion and its private signing key requires separate operator approval; this code does not activate a producer, update a running home or install an app.
+Workers use `local-only` with `yolo` off: automatic assignment prepares isolated changes, not automatic publication or installation.
+
 ## Spoken interface and captain inbox (config/voice-*, config/inbox-*)
 
 The spoken interface in [`docs/voice-relay.md`](voice-relay.md) and the model-backed subcommands of `bin/fm-inbox.sh` reach a paid API in a named account, so no region, model id or AWS profile is shipped as a tracked default.

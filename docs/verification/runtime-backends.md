@@ -2689,3 +2689,9 @@ The regression's structured timing output separates local synthetic capture, dur
 The exception supports only Pi workers on tmux or Herdr; the new admission path has live Pi/tmux evidence here, not live House/Herdr end-to-end or physical-install evidence.
 The existing Herdr lifecycle classifiers are unchanged, while zellij, cmux, Orca, non-Pi workers and the non-Pi supervision host do not receive this new launch authority.
 No installed application, operational home configuration, existing bearer, service or real signing key is exercised by these guards.
+
+The separate `tests/fm-house-feedback-native.test.py` exercises authenticated intake while a real Pi primary is busy, using the guarded named Herdr lab and actual worktree-local Treehouse allocation rather than the tmux fixture above.
+Invoke it with `FM_HOUSE_FEEDBACK_NATIVE=1` and `FM_HOUSE_FEEDBACK_EVIDENCE` set to an explicitly approved evidence directory; it spends model tokens and currently selects a host-specific Node executable path.
+It additionally checks historical Installed projection and dependent reservation during later Checking, plus staged-launch revocation with and without environment allowlisting.
+Its signed update inputs are synthetic projection evidence, not physical installation proof; the earlier tmux result does not establish that this native suite passed.
+The native test's command log, projections and pane traces belong in its private evidence directory, not in operator setup guidance.
