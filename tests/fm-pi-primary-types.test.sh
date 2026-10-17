@@ -6,6 +6,15 @@ set -eu
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# A Node shim may expose node without its installation's sibling npm.
+# Recover that toolchain only for this compiler invocation.
+if ! command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+  NODE_BIN=$(node -p 'require("node:path").dirname(process.execPath)')
+  if [ -x "$NODE_BIN/npm" ]; then
+    export PATH="$NODE_BIN:$PATH"
+  fi
+fi
+
 for tool in node npm; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "not ok - Pi extension typecheck prerequisite not found: $tool" >&2
