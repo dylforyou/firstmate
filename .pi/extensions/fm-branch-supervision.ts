@@ -1373,7 +1373,7 @@ export default function (pi: ExtensionAPI) {
           // accidental in-shell reassignment fails loudly instead of silently
           // impersonating main. Confused-agent-grade by design; the threat
           // model lives in bin/fm-lease-lib.sh.
-          command: `readonly FM_SUPERVISION_ACTOR FM_LEASE_HOLDER_PID
+          command: `readonly FM_SUPERVISION_ACTOR FM_SUPERVISION_PRIMARY_HARNESS FM_LEASE_HOLDER_PID
 (
 ${context.command}
 )`,
@@ -1381,6 +1381,7 @@ ${context.command}
             ...context.env,
             ...scriptEnv,
             FM_SUPERVISION_ACTOR: "branch",
+            FM_SUPERVISION_PRIMARY_HARNESS: "pi",
             FM_LEASE_HOLDER_PID: leaseHolderPid,
           },
         };

@@ -766,6 +766,16 @@ const bashTool = session.options.customTools.find((tool) => tool.name === "bash"
 const hooked = bashTool.__options.spawnHook({ command: "true", cwd: "/x", env: { PATH: "/bin" } });
 if (hooked.env.FM_SUPERVISION_ACTOR !== "branch") throw new Error("branch bash does not inject the branch actor");
 if (hooked.env.FM_LEASE_HOLDER_PID !== String(process.ppid)) throw new Error("branch bash does not pin the verified session-lock holder pid");
+// Execute the branch-owned shell environment, including a conflicting inherited
+// identity: launch authorization must receive the verified Pi primary identity.
+const { spawnSync } = await import("node:child_process");
+const identity = bashTool.__options.spawnHook({
+  command: 'test "$FM_SUPERVISION_ACTOR" = branch && test "$FM_SUPERVISION_PRIMARY_HARNESS" = pi',
+  cwd: home,
+  env: { ...process.env, FM_SUPERVISION_PRIMARY_HARNESS: "claude" },
+});
+const identityResult = spawnSync("bash", ["-c", identity.command], identity);
+if (identityResult.status !== 0) throw new Error("branch shell lacks verified Pi primary identity");
 
 // 3. Shared per-home prompt_cache_key: overrides only payloads that already
 // carry one, stable within the home.
