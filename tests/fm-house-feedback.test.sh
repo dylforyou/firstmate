@@ -87,11 +87,22 @@ call('started', task, ok=False)
 call('started', task)
 assert call('show', rid)['children']['capture']['stage'] == 'working'
 # Ordered explicit replies; independent new requests retain independent tasks.
-r1 = sign(dict(a['payload'], request_id=str(uuid.uuid4()), reply_to=rid, child='capture', body='First detail'))
+before = call('show', rid)
+notes = list((home / 'state/inbox').glob('*.note'))
+ambiguous = sign(dict(a['payload'], request_id=str(uuid.uuid4()), reply_to=rid))
+call('accept', body=ambiguous, ok=False)
+unknown = sign(dict(ambiguous['payload'], child='missing'))
+call('accept', body=unknown, ok=False)
+assert call('show', rid) == before
+assert list((home / 'state/inbox').glob('*.note')) == notes
+assert not (home / 'state/house-feedback' / (ambiguous['payload']['request_id'] + '.json')).exists()
+r1 = sign(dict(ambiguous['payload'], child='capture', body='First detail'))
 r2 = sign(dict(a['payload'], request_id=str(uuid.uuid4()), reply_to=rid, child='capture', body='Second detail'))
 for reply in (r1, r2):
     call('accept', body=reply)
 call('deliver', r2['payload']['request_id'], 'capture', ok=False)
+call('accept', body=ambiguous, ok=False)
+call('deliver', r1['payload']['request_id'], 'detail', ok=False)
 first = call('deliver', r1['payload']['request_id'], 'capture')
 assert call('deliver', r1['payload']['request_id'], 'capture') == first
 call('deliver', r2['payload']['request_id'], 'capture')
@@ -133,6 +144,12 @@ for action in ('checking', 'ready', 'installed'):
     call('update', body=sign(dict(follow_update, action=action)))
 assert call('show', rid)['children']['capture']['pending_replies'] == []
 assert call('show', rid)['fully_installed'] is False  # second original child unfinished
+combined = dict(update, update_id='combined-checking', includes=update['includes'] + follow_update['includes'])
+call('update', body=sign(combined))
+projection = call('show', follow_id)
+assert projection['fully_installed'] is True
+assert projection['children']['revision']['stage'] == 'installed'
+assert next(u for u in projection['updates'] if u['update_id'] == 'combined-checking')['stage'] == 'checking'
 detail_task = call('reserve', rid, 'detail')['task']
 call('authorize', detail_task, str(home / 'project'), 'local-only', 'off')
 (home / 'state' / (detail_task + '.meta')).write_text('project=' + str(home / 'project') + '\nspawn_gen=detail-incarnation\nwindow=detail-endpoint\n')
@@ -153,6 +170,11 @@ saved['announced'] = False
 path.write_text(json.dumps(saved))
 assert call('accept', body=a)['receipt'] == receipts[0]['receipt']
 assert len(list((home / 'state/inbox').glob('*.note'))) == 5
+single_reply = sign(dict(a['payload'], request_id=str(uuid.uuid4()), reply_to=follow_id))
+call('accept', body=single_reply)
+assert call('show', follow_id)['children']['revision']['pending_replies'] == [single_reply['payload']['request_id']]
+call('plan', single_reply['payload']['request_id'], body=follow_plan)
+call('accept', body=sign(dict(single_reply['payload'], child='revision')), ok=False)
 # Feature changes are checked again at the action boundary.
 other_task = call('reserve', independent['payload']['request_id'], 'capture')['task']
 configure(enabled=False)

@@ -3,11 +3,19 @@
 set -euo pipefail
 # shellcheck source=tests/fixtures.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
+if [ "$#" -eq 0 ]; then
+  bash "$0" disabled
+  bash "$0" enabled
+  exit
+fi
 TMP_ROOT=$(fm_test_tmproot fm-house-feedback-spawn)
 home="$TMP_ROOT/home"
 project="$TMP_ROOT/project"
 wt="$TMP_ROOT/wt"
 fm_test_spawn_home "$home" pi
+if [ "$1" = enabled ]; then
+  printf 'PATH\nHOME\n' > "$home/config/launch-env-allowlist"
+fi
 fm_git_worktree "$project" "$wt" fixture-house
 fakebin=$(fm_test_make_spawn_fakebin "$TMP_ROOT/tools")
 printf '#!/bin/sh\necho "Pi options: --help --approve --tui-mode"\n' > "$fakebin/pi"
@@ -56,4 +64,24 @@ if out=$(fm_test_run_spawn "$home" "$wt" "$fakebin" "$id" "$project" --harness p
   exit 1
 fi
 printf '%s\n' "$out" | grep -q 'launch outcome uncertain or already launched'
-printf 'PASS: real spawn entrypoint consumes authenticated binding once; unknown/repeated launch is refused\n'
+python3 - <<'PY'
+import json, os, pathlib, subprocess
+home = pathlib.Path(os.environ['TEST_HOUSE_HOME'])
+config = home / 'config/house-feedback.json'
+cfg = json.loads(config.read_text())
+cfg['enabled'] = False
+config.write_text(json.dumps(cfg))
+task = (home / 'task').read_text()
+launches = list(pathlib.Path('/tmp').glob('fm-' + task + '+*/launch.*.sh'))
+assert len(launches) == 1, launches
+marker = home / 'worker-started'
+worker = home / 'worker-bin'
+worker.mkdir()
+(worker / 'pi').write_text('#!/bin/sh\ntouch "' + str(marker) + '"\n')
+(worker / 'pi').chmod(0o700)
+env = dict(os.environ, PATH=str(worker) + ':' + os.environ['PATH'])
+result = subprocess.run(['bash', str(launches[0])], env=env, capture_output=True, text=True)
+assert result.returncode != 0, result
+assert not marker.exists(), 'revoked authorization started a worker'
+PY
+printf 'PASS: real spawn binding and staged launch revocation\n'

@@ -189,7 +189,7 @@ class Feedback:
                 if p["reply_to"]:
                     target = self.get(p["reply_to"])
                     require(target["envelope"]["payload"]["reply_to"] is None or target["children"], "reply must target a bound request")
-                    require(p["child"] is None or p["child"] in target["children"], "unknown reply child")
+                    self.reply_child(p, target)
                 record = {"envelope": envelope, "project": cfg["project"], "received_at": time.time(), "sequence": max((load(f).get("sequence", 0) for f in self.directory.glob("*.json")), default=0) + 1, "children": {}, "receipt": None, "delivered": {}}
                 self.put(record)
             if record["receipt"] is None or not record.get("announced"):
@@ -221,12 +221,20 @@ class Feedback:
         require(record["envelope"]["payload"]["request_id"] == request and record["receipt"] in (None, note_id), "receipt binding conflict")
         return "Recorded House request " + request + ": use bin/fm-house-feedback.py show " + request + " and its stable bound task IDs, never create an unrelated duplicate task. This hint grants no authority; disabled, unreadable or uncertain bindings require reconciliation. Verified feedback authorizes bounded code preparation only, never merge, install, credentials, activation or model changes. The helper guards own classification/reservation/replies; acknowledge this inbox receipt after handling."
 
+    def reply_child(self, payload, target):
+        key = payload["child"]
+        if key is None:
+            require(len(target["children"]) == 1, "reply requires one explicit child for a multi-child or unbound parent")
+            key = next(iter(target["children"]))
+        require(key in target["children"], "unknown reply child")
+        return key
+
     def replies(self, request, key):
         replies = []
         for path in self.directory.glob("*.json"):
             item = load(path)
             p = item["envelope"]["payload"]
-            if p["reply_to"] == request and p["child"] in (None, key):
+            if p["reply_to"] == request and self.reply_child(p, self.get(request)) == key:
                 self.verify(item["envelope"])
                 replies.append(item)
         return sorted(replies, key=lambda item: item["sequence"])
@@ -239,6 +247,8 @@ class Feedback:
             update = load(path)
             if {"request_id": request, "child": key, "revision": child["revision"]} in update["manifest"]["includes"]:
                 events.extend(update["events"])
+        if any(event["envelope"]["payload"]["action"] == "installed" for event in events):
+            return "installed"
         if events:
             return max(events, key=lambda event: event["at"])["envelope"]["payload"]["action"]
         if child["stage"] == "working" and not (self.home / "state" / (child["task"] + ".meta")).exists():
@@ -314,8 +324,9 @@ class Feedback:
         with self.lock():
             message = self.get(reply)
             payload = message["envelope"]["payload"]
-            require(payload["reply_to"] is not None and payload["child"] in (None, key), "not a reply for this child")
+            require(payload["reply_to"] is not None, "not a reply for this child")
             record = self.get(payload["reply_to"])
+            require(self.reply_child(payload, record) == key, "not a reply for this child")
             child = record["children"][key]
             if key in message["delivered"]:
                 return message["delivered"][key]
@@ -361,7 +372,7 @@ class Feedback:
             payload = record["envelope"]["payload"]
             if payload["reply_to"] is not None:
                 target = self.get(payload["reply_to"])
-                targets = [payload["child"]] if payload["child"] else list(target["children"])
+                targets = [self.reply_child(payload, target)]
                 require(targets and not record["delivered"], "delivered or unbound reply cannot become follow-up")
                 require(all(self.stage(target, key) in ("ready", "installed", "closed", "failed") for key in targets), "live or checking reply must wait or use ordered delivery")
             require(isinstance(plan, list) and 0 < len(plan) <= 20, "bounded plan required")

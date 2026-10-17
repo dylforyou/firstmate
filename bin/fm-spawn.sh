@@ -6346,7 +6346,7 @@ fi
 if [ "$HOUSE_FEEDBACK_TASK" -eq 1 ]; then
   # A pane may execute delivered text later; check again immediately before
   # exec as well as at delivery, never treating queued text as authority.
-  LAUNCH="FM_HOME=$(shell_quote "$FM_HOME") python3 $(shell_quote "$SCRIPT_DIR/fm-house-feedback.py") verify-launch $(shell_quote "$ID") $(shell_quote "$PROJ_ABS") $(shell_quote "$SPAWN_GEN") >/dev/null && $LAUNCH"
+  LAUNCH="FM_HOME=$(shell_quote "$FM_HOME") python3 $(shell_quote "$SCRIPT_DIR/fm-house-feedback.py") verify-launch $(shell_quote "$ID") $(shell_quote "$PROJ_ABS") $(shell_quote "$SPAWN_GEN") >/dev/null && { $LAUNCH; }"
 fi
 if ! (umask 077 && printf '%s\n' "$LAUNCH" >"$LAUNCH_STAGE" &&
   chmod 0600 "$LAUNCH_STAGE" && mv -f "$LAUNCH_STAGE" "$LAUNCH_FILE"); then
